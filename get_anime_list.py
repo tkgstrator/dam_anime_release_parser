@@ -51,7 +51,10 @@ def merge_json(release_date: str, force_fetch: bool, search_info: bool):
         target_path = f'dist/{category_id}.json'
         with open(target_path, 'r') as f:
             results.extend(json.load(f))
+    # 重複を削除する
     filtered_results = list(filter(lambda result: result['distStart'] >= release_date, results))
+    filtered_results = list({v['requestNo']:v for v in filtered_results}.values())
+    # 詳細検索オプションが有効の時
     if search_info:
         logging.info(f'Searching detailed information...')
         target_path = f'dist/00000.json'
@@ -70,11 +73,13 @@ def merge_json(release_date: str, force_fetch: bool, search_info: bool):
             with open(target_path, 'r') as f:
                 logging.error(f'Results: {len(json.load(f))}')
                 logging.error(f'File exists: {target_path}')
+    # 詳細検索オプションが無効の時
+    # 単純にマージして終了
     else:
         logging.info(f'Complete!: {len(results)} --> {len(filtered_results)}') 
         target_path = f'dist/{release_date}.json'
         with open(target_path, 'w') as f:
-            f.write(json.dumps(results, indent=2, ensure_ascii=False))
+            f.write(json.dumps(filtered_results, indent=2, ensure_ascii=False))
     sys.exit(0)
 
 def get_json(category_id: list[int], force_fetch: bool):
@@ -87,7 +92,8 @@ def get_json(category_id: list[int], force_fetch: bool):
             for index, title_id in enumerate(title_list):
                 program_title = title_id['programTitle']
                 logging.info(f'Progress: {str(index + 1).rjust(length)}/{str(len(title_list)).rjust(length)} ProgramTitle: {program_title}')
-                results.extend(get_list_by_program_title(program_title))
+                logging.info(f'Complate: {len(results)}')
+                results.extend(get_list_by_program_title(program_title, category_id))
             logging.info(f'Complate: {len(results)}')
             with open(target_path, 'w') as f:
                 f.write(json.dumps(results, indent=2, ensure_ascii=False))
@@ -97,6 +103,120 @@ def get_json(category_id: list[int], force_fetch: bool):
                 logging.error(f'File exists: {target_path}')
         sys.exit(0)
 
+def format(result: dict) -> dict:
+    return {
+        'artistCode': int(result.artistId),
+        'artistKana': result.artistKana,
+        'artist': result.artistName,
+        'distEnd': result.distEnd if result.distEnd != '99999999' else None,
+        'distStart': f'{result.distStart[:4]}-{result.distStart[4:6]}-{result.distStart[6:]}',
+        'firstLine': result.firstBars,
+        'animeFlag': result.funcAnimePicture != '0',
+        'honninFlag': result.funcPersonPicture != '0',
+        'recordingType': int(result.funcRecording),
+        'scoreFlag': result.funcScore != '0',
+        'indicationMonth': result.indicationMonth if result.indicationMonth != '' else None,
+        'myKey': int(result.myKey),
+        'orgKey': int(result.orgKey),
+        'programTitle': result.programTitle,
+        'requestNo': f'{result.reqNo[:4]}-{result.reqNo[4:]}',
+        'title': result.songName,
+        'titleYomi_Kana': result.songKana,
+        'titleFirstKana': result.titleFirstKana
+    }
+
+def format_detailed(result: dict) -> dict:
+    music_info = result.list[0].kModelMusicInfoList[0]
+    model_list = music_info.eachModelMusicInfoList
+    return {
+        'artistCode': result.data.artistCode,
+        'artist': result.data.artist,
+        'firstLine': result.data.firstLine,
+        'programTitle': music_info.highlightTieUp,
+        'requestNo': result.data.requestNo,
+        'title': result.data.title,
+        'titleYomi_Kana': result.data.titleYomi_Kana,
+        'kidsFlag': music_info.kidsFlag != '0',
+        'damTomoPublicVocalFlag': music_info.damTomoPublicVocalFlag != '0',
+        'damTomoPublicMovieFlag': music_info.damTomoPublicMovieFlag != '0',
+        'damTomoPUblicRecordingFlag': music_info.damTomoPUblicRecordingFlag != '0',
+        'karaokeDamFlag': music_info.karaokeDamFlag != '0',
+        'playbackTime': music_info.playbackTime,
+        'eachModelMusicInfoList': list(map(lambda model: {
+            'karaokeModelNum': int(model.karaokeModelNum),
+            'karaokeModelName': model.karaokeModelName,
+            'releaseDate': model.releaseDate,
+            'shift': int(model.shift) if model.shift is not None else None,
+            'mainMovieId': int(model.mainMovieId),
+            'mainMovieName': model.mainMovieName if model.mainMovieName != '対応していない' else None,
+            'subMovieId': int(model.subMovieId),
+            'subMovieName': model.subMovieName if model.subMovieName != '対応していない' else None,
+            'honninFlag': model.honninFlag != '0',
+            'animeFlag': model.animeFlag != '0',
+            'liveFlag': model.liveFlag != '0',
+            'mamaotoFlag': model.mamaotoFlag != '0',
+            'namaotoFlag': model.namaotoFlag != '0',
+            'duetFlag': model.duetFlag != '0',
+            'guideVocalFlag': model.guideVocalFlag != '0',
+            'prookeFlag': model.prookeFlag != '0',
+            'scoreFlag': model.scoreFlag != '0',
+            'duetDxFlag': model.duetDxFlag != '0',
+            'damTomoMovieFlag': model.damTomoMovieFlag != '0',
+            'damTomoRecordingFlag': model.damTomoRecordingFlag != '0',
+            'myListFlag': model.myListFlag != '0',
+        }, list(filter(lambda model: model.karaokeModelNum in ['17', '53', '56'], model_list))))
+    }
+
+def get_detailed_by_request_no(requestNo: str) -> dict:
+    url = 'https://denmokuapp.clubdam.com/dkwebsys/search-api/GetMusicDetailInfoApi'
+    parameters = {
+        "requestNo": requestNo,
+        "authKey": "2/Qb9R@8s*",
+        "compId": "1",
+        "modelTypeCode": "3"
+    }
+    headers = {
+        'content-type': 'application/json',
+        'dmk-access-key': 'ZRLkesTqAHDM6G2VLxps'
+    }
+    return format_detailed(requests.post(url, data=json.dumps(parameters), headers=headers).json(object_hook=AttributeDict))
+
+
+def get_list_by_program_title(programTitle: dict, category_id: int) -> list[dict]:
+    url = 'https://denmokuapp.clubdam.com/dkdenmoku/DkDamSearchServlet'
+    parameters = {
+        "deviceId": "ZlUs4awByTK35bDar1cPoHR0W7V3Aywv55/QbQoLSmg=",
+        "appVer": 36,
+        "categoryCd": f"0{category_id}",
+        "page": 1,
+        "programTitle": programTitle,
+        "songSearchFlag": 2,
+    }
+    headers = {
+        'content-type': 'application/json',
+        'dmk-access-key': 'ZRLkesTqAHDM6G2VLxps'
+    }
+    results = requests.post(url, data=json.dumps(parameters), headers=headers).json(object_hook=AttributeDict).searchResult
+    return list(map(lambda result: format(result), results))
+
+def get_list_by_category(category_id: str) -> list[dict]:
+    url = 'https://denmokuapp.clubdam.com/dkdenmoku/DkDamSearchServlet'
+    parameters = {
+        "deviceId": "ZlUs4awByTK35bDar1cPoHR0W7V3Aywv55/QbQoLSmg=",
+        "appVer": 36,
+        "categoryCd": f'0{category_id}',
+        "page": 1,
+        "songSearchFlag": 2,
+        "songMatchType": 3
+    }
+    headers = {
+        'content-type': 'application/json',
+        'dmk-access-key': 'ZRLkesTqAHDM6G2VLxps'
+    }
+    results = requests.post(url, data=json.dumps(parameters), headers=headers).json(object_hook=AttributeDict).searchResult
+    logging.info(f'Category Id: {category_id}')
+    logging.info(f'Results: {len(results)}')
+    return list(map(lambda result: format(result), results))
 
 def main(_argv: list[str] | None = None):
     """Main
@@ -114,7 +234,7 @@ def main(_argv: list[str] | None = None):
         type=int,
         dest='category_id',
         nargs='+',
-        choices=[50100, 50300],
+        choices=[50100, 50200, 50300],
     )
     group.add_argument(
         '-m',
@@ -167,120 +287,6 @@ def main(_argv: list[str] | None = None):
     if category_id is not None:
         get_json(category_id, force_fetch)
 
-def format(result: dict) -> dict:
-    return {
-        'artistCode': int(result.artistId),
-        'artistKana': result.artistKana,
-        'artist': result.artistName,
-        'distEnd': result.distEnd if result.distEnd != '99999999' else None,
-        'distStart': f'{result.distStart[:4]}-{result.distStart[4:6]}-{result.distStart[6:]}',
-        'firstLine': result.firstBars,
-        'animeFlag': result.funcAnimePicture != '0',
-        'honninFlag': result.funcPersonPicture != '0',
-        'recordingType': int(result.funcRecording),
-        'scoreFlag': result.funcScore != '0',
-        'indicationMonth': result.indicationMonth if result.indicationMonth != '' else None,
-        'myKey': int(result.myKey),
-        'orgKey': int(result.orgKey),
-        'programTitle': result.programTitle,
-        'requestNo': f'{result.reqNo[:4]}-{result.reqNo[4:]}',
-        'title': result.songName,
-        'titleYomi_Kana': result.songKana,
-        'titleFirstKana': result.titleFirstKana
-    }
-
-def format_detailed(result: dict) -> dict:
-    music_info = result.list[0].kModelMusicInfoList[0]
-    model_list = music_info.eachModelMusicInfoList
-    return {
-        'artistCode': result.data.artistCode,
-        'artist': result.data.artist,
-        'firstLine': result.data.firstLine,
-        'programTitle': music_info.highlightTieUp,
-        'requestNo': result.data.requestNo,
-        'title': result.data.title,
-        'titleYomi_Kana': result.data.titleYomi_Kana,
-        'kidsFlag': music_info.kidsFlag != '0',
-        'damTomoPublicVocalFlag': music_info.damTomoPublicVocalFlag != '0',
-        'damTomoPublicMovieFlag': music_info.damTomoPublicMovieFlag != '0',
-        'damTomoPUblicRecordingFlag': music_info.damTomoPUblicRecordingFlag != '0',
-        'karaokeDamFlag': music_info.karaokeDamFlag != '0',
-        'playbackTime': music_info.playbackTime,
-        'eachModelMusicInfoList': list(map(lambda model: {
-            'karaokeModelNum': int(model.karaokeModelNum),
-            'karaokeModelName': model.karaokeModelName,
-            'releaseDate': model.releaseDate,
-            'shift': int(model.shift),
-            'mainMovieId': int(model.mainMovieId),
-            'mainMovieName': model.mainMovieName if model.mainMovieName != '対応していない' else None,
-            'subMovieId': int(model.subMovieId),
-            'subMovieName': model.subMovieName if model.subMovieName != '対応していない' else None,
-            'honninFlag': model.honninFlag != '0',
-            'animeFlag': model.animeFlag != '0',
-            'liveFlag': model.liveFlag != '0',
-            'mamaotoFlag': model.mamaotoFlag != '0',
-            'namaotoFlag': model.namaotoFlag != '0',
-            'duetFlag': model.duetFlag != '0',
-            'guideVocalFlag': model.guideVocalFlag != '0',
-            'prookeFlag': model.prookeFlag != '0',
-            'scoreFlag': model.scoreFlag != '0',
-            'duetDxFlag': model.duetDxFlag != '0',
-            'damTomoMovieFlag': model.damTomoMovieFlag != '0',
-            'damTomoRecordingFlag': model.damTomoRecordingFlag != '0',
-            'myListFlag': model.myListFlag != '0',
-        }, list(filter(lambda model: model.karaokeModelNum in ['17', '53', '56'], model_list))))
-    }
-
-def get_detailed_by_request_no(requestNo: str) -> dict:
-    url = 'https://denmokuapp.clubdam.com/dkwebsys/search-api/GetMusicDetailInfoApi'
-    parameters = {
-        "requestNo": "3634-47",
-        "authKey": "2/Qb9R@8s*",
-        "compId": "1",
-        "modelTypeCode": "3"
-    }
-    headers = {
-        'content-type': 'application/json',
-        'dmk-access-key': 'ZRLkesTqAHDM6G2VLxps'
-    }
-    return format_detailed(requests.post(url, data=json.dumps(parameters), headers=headers).json(object_hook=AttributeDict))
-
-
-def get_list_by_program_title(programTitle: dict) -> list[dict]:
-    url = 'https://denmokuapp.clubdam.com/dkdenmoku/DkDamSearchServlet'
-    parameters = {
-        "deviceId": "ZlUs4awByTK35bDar1cPoHR0W7V3Aywv55/QbQoLSmg=",
-        "appVer": 36,
-        "categoryCd": "050100",
-        "page": 1,
-        "programTitle": programTitle,
-        "songSearchFlag": 2,
-    }
-    headers = {
-        'content-type': 'application/json',
-        'dmk-access-key': 'ZRLkesTqAHDM6G2VLxps'
-    }
-    results = requests.post(url, data=json.dumps(parameters), headers=headers).json(object_hook=AttributeDict).searchResult
-    return list(map(lambda result: format(result), results))
-
-def get_list_by_category(category_id: str) -> list[dict]:
-    url = 'https://denmokuapp.clubdam.com/dkdenmoku/DkDamSearchServlet'
-    parameters = {
-        "deviceId": "ZlUs4awByTK35bDar1cPoHR0W7V3Aywv55/QbQoLSmg=",
-        "appVer": 36,
-        "categoryCd": f'0{category_id}',
-        "page": 1,
-        "songSearchFlag": 2,
-        "songMatchType": 3
-    }
-    headers = {
-        'content-type': 'application/json',
-        'dmk-access-key': 'ZRLkesTqAHDM6G2VLxps'
-    }
-    results = requests.post(url, data=json.dumps(parameters), headers=headers).json(object_hook=AttributeDict).searchResult
-    logging.info(f'Category Id: {category_id}')
-    logging.info(f'Results: {len(results)}')
-    return list(map(lambda result: format(result), results))
 
 if __name__ == '__main__':
     main()
