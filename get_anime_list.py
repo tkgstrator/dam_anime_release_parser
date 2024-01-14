@@ -44,7 +44,7 @@ def __config_logger(level: str):
         format="[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
     )
 
-def merge_json(release_date: str, force_fetch: bool, search_info: bool):
+def merge_json(release_date: str, force_fetch: bool, search_info: bool, before_flag: bool, anime_flag: bool):
     results = []
     for category_id in [50100, 50300]:
         # ファイルを読み込んでマージする
@@ -52,7 +52,12 @@ def merge_json(release_date: str, force_fetch: bool, search_info: bool):
         with open(target_path, 'r') as f:
             results.extend(json.load(f))
     # 重複を削除する
-    filtered_results = list(filter(lambda result: result['distStart'] >= release_date, results))
+    if before_flag:
+        filtered_results = list(filter(lambda result: result['distStart'] < release_date, results))
+    else:
+        filtered_results = list(filter(lambda result: result['distStart'] >= release_date, results))
+    if anime_flag:
+        filtered_results = list(filter(lambda result: result['animeFlag'], filtered_results))
     filtered_results = list({v['requestNo']:v for v in filtered_results}.values())
     # 詳細検索オプションが有効の時
     if search_info:
@@ -81,6 +86,13 @@ def merge_json(release_date: str, force_fetch: bool, search_info: bool):
         with open(target_path, 'w') as f:
             f.write(json.dumps(filtered_results, indent=2, ensure_ascii=False))
     sys.exit(0)
+
+def output_raw_request_no_list(filename: str):
+    with open('dist/00000.json', 'r') as f:
+        results = sorted(json.load(f), key=lambda result: result['requestNo'])
+        with open(f'dist/{filename}.txt', 'w') as f:
+            for result in results:
+                f.write(f'{result["requestNo"].replace("-", "")}\n')
 
 def get_json(category_id: list[int], force_fetch: bool):
     for category_id in category_id: 
@@ -244,12 +256,33 @@ def main(_argv: list[str] | None = None):
         type=str,
         dest='release_date',
     )
+    group.add_argument(
+        '-o',
+        '--output',
+        metavar="FILE_NAME",
+        help='output raw request no list',
+        dest='filename',
+    )
     parser.add_argument(
         "-f",
         "--force",
         help="force fetch",
         action="store_true",
         dest="force",
+    )
+    parser.add_argument(
+        "-w",
+        "--with-anime",
+        help="filter with anime picture",
+        action="store_true",
+        dest="anime_flag",
+    )
+    parser.add_argument(
+        "-b",
+        "--before",
+        help="use before release date instead of after",
+        action="store_true",
+        dest="before_flag",
     )
     parser.add_argument(
         "-s",
@@ -271,11 +304,15 @@ def main(_argv: list[str] | None = None):
     search_info = args.search
     release_date = args.release_date
     category_id = args.category_id
+    before_flag = args.before_flag
+    anime_flag = args.anime_flag
+    filename = args.filename
     __config_logger(args.loglevel)
 
     logging.info(f'------ Mode: {"Merge and filter" if release_date is not None else "Download"}')
     logging.info(f'------ Force: {force_fetch}') 
     logging.info(f'------ Search: {search_info}') 
+
     if release_date is not None:
         logging.info(f'------ Release Date: {release_date}')
     else:
@@ -283,10 +320,11 @@ def main(_argv: list[str] | None = None):
     os.makedirs('dist', exist_ok=True)
 
     if release_date is not None:
-        merge_json(release_date, force_fetch, search_info)
+        merge_json(release_date, force_fetch, search_info, before_flag, anime_flag)
     if category_id is not None:
         get_json(category_id, force_fetch)
-
+    if filename is not None:
+        output_raw_request_no_list(filename)
 
 if __name__ == '__main__':
     main()

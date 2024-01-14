@@ -13,6 +13,7 @@ develop-eggs/
 dist/*.json
 !dist/00000.json
 !dist/50100.json
+!dist/50200.json
 !dist/50300.json
 downloads/
 eggs/
