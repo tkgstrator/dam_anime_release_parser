@@ -11,8 +11,9 @@ __pycache__/
 build/
 develop-eggs/
 dist/*.json
-!dist/050100.json
-!dist/050300.json
+!dist/00000.json
+!dist/50100.json
+!dist/50300.json
 downloads/
 eggs/
 .eggs/
