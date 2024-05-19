@@ -1,0 +1,9 @@
+services:
+  dam_anime_release_manager:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    tty: true
+    stdin_open: true
+    volumes:
+      - ../:/app
